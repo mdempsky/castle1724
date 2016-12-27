@@ -1,3 +1,4 @@
+// See "UPB Powerline Interface Module (PIM) Description".
 // http://www.simply-automated.com/tech_specs/
 
 package upb
@@ -43,14 +44,17 @@ func Client(s io.ReadWriteCloser, cfg *Config) *Conn {
 		net:  cfg.Network,
 	}
 	go c.serve()
+	// TODO(mdempsky): This finalizer won't actually work as intended,
+	// because the serve goroutine will keep c alive.
 	runtime.SetFinalizer(c, (*Conn).Close)
 	return c
 }
 
 const (
-	TXUSB     = 0x14
-	ReadRegs  = 0x12
-	WriteRegs = 0x17
+	// 6.3. "Host-To-PIM Commands"
+	TXUPB     = 0x14 // "Transmit UPB Message"
+	ReadRegs  = 0x12 // "Read PIM Registers"
+	WriteRegs = 0x17 // "Write PIM Registers"
 )
 
 func (c *Conn) serve() {
@@ -101,7 +105,7 @@ func (c *Conn) serve() {
 			}
 		case r := <-wr:
 			rq = r
-			const cmd byte = TXUSB
+			const cmd byte = TXUPB
 			log.Printf("tx %02x %q\n", cmd, hex.EncodeToString(rq.msg))
 			_, err := fmt.Fprintf(c.port, "%c%02X%02X\r", cmd, rq.msg, Checksum(rq.msg))
 			if err != nil {
@@ -168,15 +172,12 @@ func Checksum(msg []byte) byte {
 var errTruncated = errors.New("truncated message")
 
 func scanMessage(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
 	if i := bytes.IndexByte(data, '\r'); i >= 0 {
 		// We have a full message.
 		return i + 1, data[:i], nil
 	}
 	// If we're at EOF, we're missing a message.
-	if atEOF {
+	if atEOF && len(data) > 0 {
 		return len(data), nil, errTruncated
 	}
 	// Request more data.
