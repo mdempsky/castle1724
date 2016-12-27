@@ -52,6 +52,7 @@ func main() {
 	var err error
 	conn, err = upb.Open(*devFlag, &upb.Config{
 		Network: 0xB4,
+		Logf:    log.Printf,
 	})
 	if err != nil {
 		log.Fatal(err)

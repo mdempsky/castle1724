@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"runtime"
 
 	"github.com/tarm/serial"
@@ -20,10 +19,12 @@ type Conn struct {
 	port io.ReadWriteCloser
 	wr   chan *req
 	net  byte
+	logf func(fmt string, args ...interface{})
 }
 
 type Config struct {
 	Network byte
+	Logf    func(fmt string, args ...interface{})
 }
 
 func Open(name string, cfg *Config) (*Conn, error) {
@@ -42,6 +43,10 @@ func Client(s io.ReadWriteCloser, cfg *Config) *Conn {
 		port: s,
 		wr:   make(chan *req),
 		net:  cfg.Network,
+		logf: cfg.Logf,
+	}
+	if c.logf == nil {
+		c.logf = func(string, ...interface{}) {}
 	}
 	go c.serve()
 	// TODO(mdempsky): This finalizer won't actually work as intended,
@@ -70,11 +75,11 @@ func (c *Conn) serve() {
 
 	var rq *req
 	respond := func(err error) {
-		log.Printf("response: %v", err)
+		c.logf("response: %v", err)
 		select {
 		case rq.resp <- err:
 		default:
-			log.Println("failed to send response")
+			c.logf("failed to send response")
 		}
 		rq = nil
 	}
@@ -87,7 +92,7 @@ func (c *Conn) serve() {
 
 		select {
 		case s := <-rd:
-			log.Printf("rx %q\n", s)
+			c.logf("rx %q\n", s)
 			switch s {
 			case "PA": // PIM Accept; expect PK or PN next
 			case "PB": // PIM Busy
@@ -106,7 +111,7 @@ func (c *Conn) serve() {
 		case r := <-wr:
 			rq = r
 			const cmd byte = TXUPB
-			log.Printf("tx %02x %q\n", cmd, hex.EncodeToString(rq.msg))
+			c.logf("tx %02x %q\n", cmd, hex.EncodeToString(rq.msg))
 			_, err := fmt.Fprintf(c.port, "%c%02X%02X\r", cmd, rq.msg, Checksum(rq.msg))
 			if err != nil {
 				respond(err)
