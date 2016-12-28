@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"html/template"
@@ -8,7 +9,10 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/julienschmidt/sse"
 	"github.com/mdempsky/castle1724/upb"
 	"github.com/mdempsky/huejack"
 )
@@ -52,7 +56,7 @@ func main() {
 	var err error
 	conn, err = upb.Open(*devFlag, &upb.Config{
 		Network: 0xB4,
-		Logf:    log.Printf,
+		Logf:    logf,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -67,6 +71,9 @@ func main() {
 
 	http.HandleFunc("/", indexHandler)
 	http.HandleFunc("/set", setHandler)
+	http.HandleFunc("/cmd", cmdHandler)
+	http.HandleFunc("/send", sendHandler)
+	http.Handle("/log", logStreamer)
 	go http.ListenAndServe(*httpFlag, nil)
 
 	log.Println("running")
@@ -125,3 +132,68 @@ td a:active { transform: translate(0.1em, 0.1em); box-shadow: 0.1em 0.1em #4a4a4
 </table>
 </fieldset>
 `))
+
+func cmdHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	cmdHTML.Execute(w, &cfg)
+}
+
+func sendHandler(w http.ResponseWriter, r *http.Request) {
+	msg, err := hex.DecodeString(strings.Replace(r.FormValue("msg"), " ", "", -1))
+	if err != nil {
+		logf("hex decode error: %v", err)
+		return
+	}
+	conn.Send(msg)
+}
+
+var cmdHTML = template.Must(template.New("cmd").Parse(`
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+#logframe { width: 100%; height: 30em; font-family: monospace; overflow: scroll; border: thin solid black; }
+</style>
+
+<div>
+Provide a UPB message in hex format without checksum. Spaces are ignored.<br>
+<label for="cmd">Command:</label>
+<input id="cmd" name="cmd" type="text">
+<button id="send">Send</button>
+</div>
+
+<fieldset id="logframe"><legend>Logs</legend></fieldset>
+
+<script>
+var source = new EventSource("/log");
+source.onmessage = function (event) {
+  var atBottom = logframe.scrollHeight - logframe.clientHeight <= logframe.scrollTop + 1;
+
+  var x = document.createElement('div')
+  x.textContent = event.data;
+  logframe.appendChild(x);
+
+  if (atBottom) {
+    logframe.scrollTop = logframe.scrollHeight - logframe.clientHeight;
+  }
+};
+
+send.onclick = function() {
+  var xhr = new XMLHttpRequest();
+  xhr.open("POST", "/send", true);
+  xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+  xhr.send("msg=" + encodeURIComponent(cmd.value));
+
+  cmd.value = "";
+};
+</script>
+`))
+
+var logStreamer = sse.New()
+
+func logf(format string, args ...interface{}) {
+	s := fmt.Sprintf(format, args...)
+	log.Println(s)
+
+	s = fmt.Sprintf("%v %s", time.Now(), s)
+	logStreamer.SendString("", "", s)
+}

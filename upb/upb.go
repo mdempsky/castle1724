@@ -92,7 +92,7 @@ func (c *Conn) serve() {
 
 		select {
 		case s := <-rd:
-			c.logf("rx %q\n", s)
+			c.logf("rx %q", s)
 			switch s {
 			case "PA": // PIM Accept; expect PK or PN next
 			case "PB": // PIM Busy
@@ -111,7 +111,7 @@ func (c *Conn) serve() {
 		case r := <-wr:
 			rq = r
 			const cmd byte = TXUPB
-			c.logf("tx %02x %q\n", cmd, hex.EncodeToString(rq.msg))
+			c.logf("tx %02x %q", cmd, hex.EncodeToString(rq.msg))
 			_, err := fmt.Fprintf(c.port, "%c%02X%02X\r", cmd, rq.msg, Checksum(rq.msg))
 			if err != nil {
 				respond(err)
@@ -136,8 +136,14 @@ func (c *Conn) Close() error {
 	return nil
 }
 
-func (c *Conn) Send(addr, cmd byte, args []byte) error {
-	msg := append([]byte{
+func (c *Conn) Send(msg []byte) error {
+	ch := make(chan error)
+	c.wr <- &req{ch, msg}
+	return <-ch
+}
+
+func (c *Conn) Message(addr, cmd byte, args []byte) []byte {
+	return append([]byte{
 		// Packet header.
 		byte(6 + len(args) + 1), // LEN
 		0x10,  // "Acknowledge with an ACK Pulse"
@@ -146,20 +152,16 @@ func (c *Conn) Send(addr, cmd byte, args []byte) error {
 		0xFF,  // Source ID
 		cmd,   // Message Data ID
 	}, args...)
-
-	ch := make(chan error)
-	c.wr <- &req{ch, msg}
-	return <-ch
 }
 
 func (c *Conn) Goto(id, val byte) error {
 	// 11.1.3. "The Goto Command"
-	return c.Send(id, 0x22, []byte{val})
+	return c.Send(c.Message(id, 0x22, []byte{val}))
 }
 
 func (c *Conn) ReportState(id byte) error {
 	// 11.1.9. "The Report State Command"
-	return c.Send(id, 0x30, nil)
+	return c.Send(c.Message(id, 0x30, nil))
 }
 
 // Checksum computes a UPB Packet Checksum.
