@@ -152,10 +152,20 @@ var cmdHTML = template.Must(template.New("cmd").Parse(`
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 #logframe { width: 100%; height: 30em; font-family: monospace; overflow: scroll; border: thin solid black; }
+.examples dt { font-family: monospace; }
 </style>
 
 <div>
-Provide a UPB message in hex format without checksum. Spaces are ignored.<br>
+<p>Provide a UPB message in hex format without checksum. Spaces are ignored.</p>
+<p>Examples:</p>
+<dl class="examples">
+<dt>08 10 b4 01 ff 22 64</dt>
+<dd>Turn Family Lights on (100%).</dd>
+<dt>08 10 b4 01 ff 22 00</dt>
+<dd>Turn Family Lights off (0%).</dd>
+</dl>
+<p>See <a href="http://www.simply-automated.com/tech_specs/">UPB Tech Specs</a> for protocol and device details.</p>
+
 <label for="cmd">Command:</label>
 <input id="cmd" name="cmd" type="text">
 <button id="send">Send</button>
