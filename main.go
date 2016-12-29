@@ -27,6 +27,8 @@ type Device struct {
 	Dimmable bool
 }
 
+const netID = 0xB4
+
 var cfg = Config{
 	Devices: []Device{
 		{"Family Lights", 1, true},
@@ -55,8 +57,9 @@ func main() {
 
 	var err error
 	conn, err = upb.Open(*devFlag, &upb.Config{
-		Network: 0xB4,
+		Network: netID,
 		Logf:    logf,
+		RX:      rxUPB,
 	})
 	if err != nil {
 		log.Fatal(err)
@@ -206,4 +209,20 @@ func logf(format string, args ...interface{}) {
 
 	s = fmt.Sprintf("%v %s", time.Now(), s)
 	logStreamer.SendString("", "", s)
+}
+
+func rxUPB(msg []byte) {
+	go func() {
+		switch {
+		case msg[0]&0x80 != 0 && msg[2] == netID && msg[3] == 0x0B && msg[5] == 0x20:
+			time.Sleep(2 * time.Second)
+			conn.Send([]byte{0x07, 0x10, netID, 0x0B, 0xFF, 0x30})
+		case msg[0]&0x80 == 0 && msg[2] == netID && msg[3] == 0xFF && msg[4] == 0x0B && msg[5] == 0x86:
+			var cmd byte = 0x20
+			if msg[6] != 0 {
+				cmd = 0x21
+			}
+			conn.Send([]byte{0x07, 0x10, netID, 0x0B, 0xFF, cmd})
+		}
+	}()
 }

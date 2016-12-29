@@ -20,11 +20,13 @@ type Conn struct {
 	wr   chan *req
 	net  byte
 	logf func(fmt string, args ...interface{})
+	rx   func(msg []byte)
 }
 
 type Config struct {
 	Network byte
 	Logf    func(fmt string, args ...interface{})
+	RX      func(msg []byte)
 }
 
 func Open(name string, cfg *Config) (*Conn, error) {
@@ -44,9 +46,13 @@ func Client(s io.ReadWriteCloser, cfg *Config) *Conn {
 		wr:   make(chan *req),
 		net:  cfg.Network,
 		logf: cfg.Logf,
+		rx:   cfg.RX,
 	}
 	if c.logf == nil {
 		c.logf = func(string, ...interface{}) {}
+	}
+	if c.rx == nil {
+		c.rx = func([]byte) {}
 	}
 	go c.serve()
 	// TODO(mdempsky): This finalizer won't actually work as intended,
@@ -62,6 +68,12 @@ const (
 	WriteRegs = 0x17 // "Write PIM Registers"
 )
 
+func (c *Conn) txUPB(msg []byte) error {
+	c.logf("tx %q", hex.EncodeToString(msg))
+	_, err := fmt.Fprintf(c.port, "%c%02X%02X\r", TXUPB, msg, Checksum(msg))
+	return err
+}
+
 func (c *Conn) serve() {
 	rd := make(chan string)
 	go func() {
@@ -73,7 +85,7 @@ func (c *Conn) serve() {
 		close(rd)
 	}()
 
-	var rq *req
+	var rq *req // Current outgoing request
 	respond := func(err error) {
 		c.logf("response: %v", err)
 		select {
@@ -90,30 +102,56 @@ func (c *Conn) serve() {
 			wr = c.wr
 		}
 
+		// TODO(mdempsky): Handle closed channels.
 		select {
 		case s := <-rd:
 			c.logf("rx %q", s)
-			switch s {
-			case "PA": // PIM Accept; expect PK or PN next
-			case "PB": // PIM Busy
+			if len(s) < 2 || s[0] != 'P' {
+				continue
+			}
+			switch s[1] {
+			case 'A': // PIM Accept; expect PK or PN next
+			case 'B': // PIM Busy
 				respond(errPIMBusy)
-			case "PE": // PIM Error
+			case 'E': // PIM Error
 				respond(errPIMError)
-			case "PK": // Ack Response
+			case 'K': // Ack Response
 				respond(nil)
-			case "PN": // Nak Response
+			case 'N': // Nak Response
 				var err error
 				if rq.msg[1]&0x10 != 0 {
 					err = errMissingAck
 				}
 				respond(err)
+			case 'U': // Message Report
+				msg, err := hex.DecodeString(s[2:])
+				if err != nil {
+					c.logf("message decode error: %v", err)
+					continue
+				}
+				if len(msg) < 7 {
+					c.logf("message too short")
+					continue
+				}
+				if int(msg[0]&0x1f) != len(msg) {
+					c.logf("inconsistent message length")
+				}
+				msg, sum := msg[:len(msg)-1], msg[len(msg)-1]
+				if Checksum(msg) != sum {
+					c.logf("bad checksum")
+					continue
+				}
+				if msg[1]&0x03 != 0 {
+					// TODO(mdempsky): Handle retransmits properly.
+					continue
+				}
+				c.rx(msg)
 			}
+
 		case r := <-wr:
 			rq = r
-			const cmd byte = TXUPB
-			c.logf("tx %02x %q", cmd, hex.EncodeToString(rq.msg))
-			_, err := fmt.Fprintf(c.port, "%c%02X%02X\r", cmd, rq.msg, Checksum(rq.msg))
-			if err != nil {
+
+			if err := c.txUPB(rq.msg); err != nil {
 				respond(err)
 			}
 		}
