@@ -34,6 +34,7 @@ var cfg = Config{
 		{"Family Lights", 1, true},
 		{"Family Fan", 2, false},
 		{"Kitchen Lights", 3, true},
+		{"Driveway Lights", 0x0B, true},
 	},
 }
 
