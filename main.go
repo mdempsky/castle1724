@@ -217,7 +217,7 @@ func rxUPB(msg []byte) {
 		case msg[0]&0x80 != 0 && msg[2] == netID && msg[3] == 0x0B && msg[5] == 0x20:
 			time.Sleep(2 * time.Second)
 			conn.Send([]byte{0x07, 0x10, netID, 0x0B, 0xFF, 0x30})
-		case msg[0]&0x80 == 0 && msg[2] == netID && msg[3] == 0xFF && msg[4] == 0x0B && msg[5] == 0x86:
+		case msg[0]&0x80 == 0 && msg[2] == netID && msg[3] == 0xFF && msg[4] == 0x0B && msg[5] == 0x86 && len(msg) >= 7:
 			var cmd byte = 0x20
 			if msg[6] != 0 {
 				cmd = 0x21
